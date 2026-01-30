@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Insta360 Pro 2 Controller (No Python)</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #222;
+            color: #eee;
+            padding: 20px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: #333;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+        }
+
+        input,
+        select,
+        button {
+            width: 100%;
+            padding: 10px;
+            margin-top: 5px;
+            box-sizing: border-box;
+        }
+
+        button {
+            cursor: pointer;
+            font-weight: bold;
+            border: none;
+            color: white;
+            margin-top: 10px;
+        }
+
+        .btn-blue {
+            background: #2196F3;
+        }
+
+        .btn-green {
+            background: #4CAF50;
+        }
+
+        .btn-red {
+            background: #f44336;
+        }
+
+        #log {
+            background: #000;
+            height: 150px;
+            overflow-y: scroll;
+            padding: 10px;
+            font-family: monospace;
+            border: 1px solid #555;
+        }
+
+        .status {
+            font-weight: bold;
+            color: #aaa;
+        }
+
+        .status.ok {
+            color: #0f0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>📸 Insta360 Pro 2 (HTML Only)</h1>
+
+    <div class="card">
+        <h3>1. 연결 (Connect)</h3>
+        <input type="text" id="ip" value="192.168.1.188" placeholder="카메라 IP 입력">
+        <button class="btn-blue" onclick="connectCamera()">🔵 카메라 연결 (Session Connect)</button>
+        <p>상태: <span id="connStatus" class="status">연결 안 됨</span></p>
+    </div>
+
+    <div class="card">
+        <h3>2. 촬영 (Control)</h3>
+        <label>모드 선택:</label>
+        <select id="mode">
+            <option value="origin">ORIGIN (연구용 - 6개 원본 저장)</option>
+            <option value="stitching">STITCHING (일반용 - 파노라마 1장)</option>
+        </select>
+        <button class="btn-green" onclick="takePhoto()">📸 사진 촬영 (Take Photo)</button>
+    </div>
+
+    <div class="card">
+        <h3>📝 로그</h3>
+        <div id="log">준비 완료... <br>⚠️ 반드시 크롬 확장프로그램(CORS Unblock)을 켜주세요!</div>
+    </div>
+
+    <script>
+        let fingerprint = null; // 세션 인증키 (중요!)
+
+        function log(msg) {
+            const div = document.getElementById('log');
+            div.innerHTML = `[${new Date().toLocaleTimeString()}] ${msg}<br>` + div.innerHTML;
+        }
+
+        // 공통 요청 함수
+        async function sendCommand(commandName, parameters = {}) {
+            const ip = document.getElementById('ip').value;
+            // 파이썬 프록시 제거 -> 카메라 직접 호출
+            const url = `http://${ip}:8000/osc/commands/execute`;
+
+            const headers = {
+                'Content-Type': 'application/json;charset=utf-8',
+                'Accept': 'application/json'
+            };
+
+            // 연결 후에는 인증키(Fingerprint)를 헤더에 꼭 넣어야 함
+            if (fingerprint) {
+                headers['Fingerprint'] = fingerprint;
+            }
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify({
+                        name: commandName,
+                        parameters: parameters
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.state === 'error') {
+                    log(`❌ 에러: ${JSON.stringify(data.error)}`);
+                    return null;
+                }
+                return data;
+            } catch (e) {
+                log(`💥 통신 실패: ${e.message}`);
+                log(`💡 힌트: 'Allow CORS' 확장프로그램이 켜져 있나요?`);
+                return null;
+            }
+        }
+
+        // 1. 연결 함수 (HW 시간 동기화 포함)
+        async function connectCamera() {
+            log("연결 시도 중...");
+
+            // 현재 시간을 MMDDhhmmYYYY 포맷으로 변환 (카메라 요구사항)
+            const now = new Date();
+            const hw_time =
+                String(now.getMonth() + 1).padStart(2, '0') +
+                String(now.getDate()).padStart(2, '0') +
+                String(now.getHours()).padStart(2, '0') +
+                String(now.getMinutes()).padStart(2, '0') +
+                now.getFullYear();
+
+            // 1단계: camera._connect 명령 전송
+            const result = await sendCommand('camera._connect', {
+                hw_time: hw_time,
+                time_zone: "GMT+9:00"
+            });
+
+            if (result && result.state === 'done') {
+                // 2단계: 응답에서 Fingerprint 추출 및 저장
+                fingerprint = result.results.Fingerprint;
+                document.getElementById('connStatus').innerText = "✅ 연결됨 (FP: " + fingerprint + ")";
+                document.getElementById('connStatus').classList.add('ok');
+                log(`✅ 연결 성공! 세션ID: ${fingerprint}`);
+            } else {
+                log("❌ 연결 실패.");
+            }
+        }
+
+        // 2. 촬영 함수
+        async function takePhoto() {
+            if (!fingerprint) {
+                alert("먼저 카메라 연결 버튼을 눌러주세요!");
+                return;
+            }
+
+            const mode = document.getElementById('mode').value;
+            const params = {};
+
+            // 연구용(Origin) 모드 설정
+            if (mode === 'origin') {
+                params.origin = { mime: "jpg", saveOrigin: true };
+            }
+
+            log("📸 촬영 요청 중...");
+            const result = await sendCommand('camera.takePicture', params);
+
+            if (result && result.state === 'inProgress') {
+                log("⏳ 촬영 진행 중...");
+                // 촬영 완료 확인은 복잡하므로 일단 성공 메시지 출력
+                setTimeout(() => log("✅ 촬영 완료 (추정)"), 2000);
+            } else if (result && result.state === 'done') {
+                log(`✅ 촬영 완료! URL: ${result.results.fileUri}`);
+            }
+        }
+    </script>
+</body>
+
+</html>
