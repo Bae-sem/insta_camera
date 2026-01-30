@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Insta360 Pro 2 Controller (Web)</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #1a1a1a;
+            color: #eee;
+            padding: 20px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: #2d2d2d;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+
+        h1 { color: #00d2ff; text-align: center; }
+        h3 { margin-top: 0; border-bottom: 1px solid #444; padding-bottom: 10px; }
+
+        input, select, button {
+            width: 100%;
+            padding: 12px;
+            margin-top: 8px;
+            box-sizing: border-box;
+            border-radius: 6px;
+            border: 1px solid #444;
+            background: #333;
+            color: white;
+            font-size: 16px;
+        }
+
+        button {
+            cursor: pointer;
+            font-weight: bold;
+            border: none;
+            transition: opacity 0.2s;
+        }
+        button:hover { opacity: 0.9; }
+
+        .btn-blue { background: #2196F3; }
+        .btn-green { background: #4CAF50; }
+        .btn-yellow { background: #FFC107; color: black; }
+
+        #log {
+            background: #000;
+            height: 200px;
+            overflow-y: scroll;
+            padding: 15px;
+            font-family: monospace;
+            border: 1px solid #444;
+            border-radius: 6px;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .status { font-weight: bold; color: #aaa; }
+        .status.ok { color: #00e676; }
+        
+        .warning-box {
+            background: #ff980020;
+            border: 1px solid #ff9800;
+            color: #ffb74d;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>📸 Insta360 Pro 2 Controller</h1>
+
+    <div class="warning-box" id="httpsWarning">
+        ⚠️ <strong>주의: GitHub Pages(HTTPS) 사용 시</strong><br>
+        브라우저 주소창 옆의 '자물쇠' 아이콘 또는 '사이트 설정'에서 
+        <strong>"비안전 콘텐츠(Insecure Content)"</strong>를 <strong>허용</strong>해야 카메라(HTTP)와 통신할 수 있습니다.
+        <br>(또한 CORS 확장프로그램도 켜져 있어야 합니다.)
+    </div>
+
+    <div class="card">
+        <h3>1. 연결 (Connect)</h3>
+        <label>카메라 IP 주소</label>
+        <input type="text" id="ip" value="192.168.1.188" placeholder="예: 192.168.1.188">
+        <button class="btn-blue" onclick="connectCamera()">🔵 세션 연결 (Connect)</button>
+        <p>상태: <span id="connStatus" class="status">연결 대기중...</span></p>
+    </div>
+
+    <div class="card">
+        <h3>2. 촬영 (Control)</h3>
+        <label>촬영 모드 선택</label>
+        <select id="mode">
+            <option value="origin">ORIGIN (연구용 - 6개 원본 저장)</option>
+            <option value="stitching">STITCHING (일반용 - 파노라마 1장)</option>
+        </select>
+        <button class="btn-green" onclick="takePhoto()">📸 사진 촬영 (Take Photo)</button>
+        
+        <div style="display: flex; gap: 10px; margin-top: 10px;">
+            <button class="btn-yellow" onclick="checkState()">🔋 상태 확인 (Heartbeat)</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>📝 로그 (Log)</h3>
+        <div id="log">시스템 준비 완료...</div>
+    </div>
+
+    <script>
+        let fingerprint = null; // 인증키 저장소
+
+        function log(msg) {
+            const div = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            div.innerHTML = `<span style="color:#888">[${time}]</span> ${msg}<br>` + div.innerHTML;
+        }
+
+        // 공통 명령어 전송 함수
+        async function sendCommand(endpoint, commandName, parameters = {}) {
+            const ip = document.getElementById('ip').value;
+            
+            // [중요 수정] 포트 번호를 8000 -> 20000 으로 변경
+            // 8000: 파일 전송용 / 20000: 명령어 제어용
+            const url = `http://${ip}:20000/osc/${endpoint}`;
+
+            const headers = {
+                'Content-Type': 'application/json;charset=utf-8',
+                'Accept': 'application/json'
+            };
+
+            // 인증키가 있으면 헤더에 추가
+            if (fingerprint) {
+                headers['Fingerprint'] = fingerprint;
+            }
+
+            // Body 구성
+            const bodyData = {};
+            if (commandName) bodyData.name = commandName;
+            if (parameters && Object.keys(parameters).length > 0) bodyData.parameters = parameters;
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(bodyData)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP 에러 (${response.status})`);
+                }
+
+                const data = await response.json();
+                
+                if (data.state === 'error') {
+                    log(`❌ 카메라 에러: ${JSON.stringify(data.error)}`);
+                    return null;
+                }
+                return data;
+            } catch (e) {
+                log(`💥 통신 실패: ${e.message}`);
+                
+                // 에러 원인 추측 메시지
+                if (e.message.includes('Failed to fetch')) {
+                    log(`💡 힌트: 1. IP가 맞나요? 2. CORS 확장프로그램 켰나요? 3. HTTPS 혼합콘텐츠 허용했나요?`);
+                }
+                return null;
+            }
+        }
+
+        // 1. 연결 함수
+        async function connectCamera() {
+            log("연결 시도 중...");
+            
+            // 현재 시간을 MMDDhhmmYYYY 포맷으로 변환
+            const now = new Date();
+            const hw_time = 
+                String(now.getMonth() + 1).padStart(2, '0') +
+                String(now.getDate()).padStart(2, '0') +
+                String(now.getHours()).padStart(2, '0') +
+                String(now.getMinutes()).padStart(2, '0') +
+                now.getFullYear();
+
+            // 연결 명령 전송 (endpoint: commands/execute)
+            const result = await sendCommand('commands/execute', 'camera._connect', {
+                hw_time: hw_time,
+                time_zone: "GMT+9:00"
+            });
+
+            if (result && result.state === 'done') {
+                fingerprint = result.results.Fingerprint;
+                document.getElementById('connStatus').innerHTML = `✅ 연결됨 <br><small>(ID: ${fingerprint.substring(0,10)}...)</small>`;
+                document.getElementById('connStatus').classList.add('ok');
+                log(`✅ 연결 성공!`);
+            }
+        }
+
+        // 2. 사진 촬영 함수
+        async function takePhoto() {
+            if (!fingerprint) {
+                alert("먼저 '세션 연결'을 해주세요!");
+                return;
+            }
+
+            const mode = document.getElementById('mode').value;
+            const params = {};
+
+            // 연구용(Origin) 모드
+            if (mode === 'origin') {
+                params.origin = { mime: "jpg", saveOrigin: true };
+            }
+
+            log("📸 촬영 요청...");
+            const result = await sendCommand('commands/execute', 'camera.takePicture', params);
+
+            if (result) {
+                if (result.state === 'inProgress') {
+                    log("⏳ 촬영 중...");
+                } else {
+                    log(`✅ 촬영 완료! URL: ${result.results?.fileUri || '저장됨'}`);
+                }
+            }
+        }
+
+        // 3. 상태 확인 (Heartbeat)
+        async function checkState() {
+            // state 명령은 endpoint가 'state'이고 body가 비어있음
+            const result = await sendCommand('state', null, null);
+            if (result) {
+                const bat = result.state?._battery?.battery_level || '?';
+                log(`🔋 배터리: ${bat*100}% | 상태: ${JSON.stringify(result.state._cam_state)}`);
+            }
+        }
+    </script>
+</body>
+</html>
