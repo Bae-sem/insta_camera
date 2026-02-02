@@ -1,0 +1,42 @@
+{
+    "model": {
+        "model_id": "anycalib_dist",
+        "description": "Model types: anycalib_pinhole (perspective only), anycalib_gen (general images), anycalib_dist (distorted images), anycalib_edit (edited images)"
+    },
+    "camera": {
+        "cam_id": "kb:4",
+        "description": "Camera model options: pinhole, simple_pinhole, radial:k (k=1-4), simple_radial:k, kb:k (k=1-4), simple_kb:k, ucm, simple_ucm, eucm, simple_eucm, division:k, simple_division:k"
+    },
+    "input": {
+        "image_dir": "../photos",
+        "image_pattern": "origin_{}.jpg",
+        "image_indices": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+        ],
+        "description": "Input image settings. image_pattern uses {} as placeholder for index."
+    },
+    "output": {
+        "output_dir": "anycalib_results",
+        "json_file": "anycalib.json",
+        "save_undistorted": true,
+        "undistorted_prefix": "calib_photo",
+        "description": "Output settings for calibration results."
+    },
+    "optimization": {
+        "nonlin_opt_method": "gauss_newton",
+        "init_with_sac": false,
+        "fallback_to_sac": true,
+        "rm_borders": 0,
+        "sample_size": -1,
+        "description": "Advanced optimization parameters. nonlin_opt_method: gauss_newton or lev_mar. sample_size: -1 for no subsampling."
+    },
+    "device": {
+        "use_cuda": true,
+        "description": "Device settings. If use_cuda is true and CUDA is available, GPU will be used."
+    }
+}
